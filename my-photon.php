@@ -3,7 +3,7 @@
 /*
 	Plugin Name: My Photon
 	Plugin URI: http://www.alleyinteractive.com/
-	Description: Integrate a self-hosted version of Photon with your WordPress site.
+	Description: Integrate a self-hosted version of Photon (Jetpack 3.9.1) with your WordPress site.
 	Version: 0.1
 	Author: Matthew Boynes
 	Author URI: http://www.alleyinteractive.com/
