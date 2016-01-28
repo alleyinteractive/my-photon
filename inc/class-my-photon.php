@@ -328,7 +328,7 @@ class My_Photon {
 		//	           && ! empty( $this_gallery['src'] )
 		//	           && ! empty( $this_gallery['type'] )
 		//	           && in_array( $this_gallery['type'], array( 'rectangle', 'square', 'circle' ) ) ) {
-		//		$this_gallery['src'] = array_map( 'jetpack_photon_url', $this_gallery['src'] );
+		//		$this_gallery['src'] = array_map( 'my_photon_url', $this_gallery['src'] );
 			}
 		}
 		unset( $this_gallery ); // break the reference.
@@ -487,7 +487,7 @@ class My_Photon {
 	 *
 	 * @since 3.8.0
 	 * @param array $sources An array of image urls and widths.
-	 * @uses self::validate_image_url, jetpack_photon_url
+	 * @uses self::validate_image_url, my_photon_url
 	 * @return array An array of Photon image urls and widths.
 	 */
 	public function filter_srcset_array( $sources, $size_array, $image_src, $image_meta ) {
