@@ -53,10 +53,13 @@ class My_Photon {
 
 		// Images in post content and galleries
 		add_filter( 'the_content', array( __CLASS__, 'filter_the_content' ), 999999 );
-		add_filter( 'get_post_gallery', array( __CLASS__, 'filter_the_content' ), 999999 );
+		add_filter( 'get_post_galleries', array( __CLASS__, 'filter_the_galleries' ), 999999 );
 
 		// Core image retrieval
 		add_filter( 'image_downsize', array( $this, 'filter_image_downsize' ), 10, 3 );
+
+		// Responsive image srcset substitution
+		add_filter( 'wp_calculate_image_srcset', array( $this, 'filter_srcset_array' ), 10, 4 );
 	}
 
 
@@ -146,6 +149,9 @@ class My_Photon {
 				// Support Automattic's Lazy Load plugin
 				// Can't modify $tag yet as we need unadulterated version later
 				if ( preg_match( '#data-lazy-src=["|\'](.+?)["|\']#i', $images['img_tag'][ $index ], $lazy_load_src ) ) {
+					$placeholder_src = $placeholder_src_orig = $src;
+					$src = $src_orig = $lazy_load_src[1];
+				} elseif ( preg_match( '#data-lazy-original=["|\'](.+?)["|\']#i', $images['img_tag'][ $index ], $lazy_load_src ) ) {
 					$placeholder_src = $placeholder_src_orig = $src;
 					$src = $src_orig = $lazy_load_src[1];
 				}
@@ -307,6 +313,29 @@ class My_Photon {
 		return $content;
 	}
 
+	public static function filter_the_galleries( $galleries ) {
+		if ( empty( $galleries ) || ! is_array( $galleries ) ) {
+			return $galleries;
+		}
+
+		// Pass by reference, so we can modify them in place.
+		foreach ( $galleries as &$this_gallery ) {
+			if ( is_string( $this_gallery ) ) {
+				$this_gallery = self::filter_the_content( $this_gallery );
+		// LEAVING COMMENTED OUT as for the moment it doesn't seem
+		// necessary and I'm not sure how it would propagate through.
+		//	} elseif ( is_array( $this_gallery )
+		//	           && ! empty( $this_gallery['src'] )
+		//	           && ! empty( $this_gallery['type'] )
+		//	           && in_array( $this_gallery['type'], array( 'rectangle', 'square', 'circle' ) ) ) {
+		//		$this_gallery['src'] = array_map( 'my_photon_url', $this_gallery['src'] );
+			}
+		}
+		unset( $this_gallery ); // break the reference.
+
+		return $galleries;
+	}
+
 	/**
 	 ** CORE IMAGE RETRIEVAL
 	 **/
@@ -329,10 +358,15 @@ class My_Photon {
 		// Get the image URL and proceed with Photon-ification if successful
 		$image_url = wp_get_attachment_url( $attachment_id );
 
+		// Set this to true later when we know we have size meta.
+		$has_size_meta = false;
+
 		if ( $image_url ) {
 			// Check if image URL should be used with Photon
 			if ( ! self::validate_image_url( $image_url ) )
 				return $image;
+
+			$intermediate = true; // For the fourth array item returned by the image_downsize filter.
 
 			// If an image is requested with a size known to WordPress, use that size's settings with Photon
 			if ( ( is_string( $size ) || is_int( $size ) ) && array_key_exists( $size, self::image_sizes() ) ) {
@@ -341,18 +375,30 @@ class My_Photon {
 
 				$photon_args = array();
 
-				// `full` is a special case in WP
-				// To ensure filter receives consistent data regardless of requested size, `$image_args` is overridden with dimensions of original image.
+				$image_meta = image_get_intermediate_size( $attachment_id, $size );
+
+				// 'full' is a special case: We need consistent data regardless of the requested size.
 				if ( 'full' == $size ) {
 					$image_meta = wp_get_attachment_metadata( $attachment_id );
+					$intermediate = false;
+				} elseif ( ! $image_meta ) {
+					$image_meta = wp_get_attachment_metadata( $attachment_id );
+
 					if ( isset( $image_meta['width'], $image_meta['height'] ) ) {
-						// 'crop' is true so Photon's `resize` method is used
-						$image_args = array(
-							'width'  => $image_meta['width'],
-							'height' => $image_meta['height'],
-							'crop'   => true
-						);
+						$image_resized = image_resize_dimensions( $image_meta['width'], $image_meta['height'], $image_args['width'], $image_args['height'], $image_args['crop'] );
+						if ( $image_resized ) { // This could be false when the requested image size is larger than the full-size image.
+							$image_meta['width'] = $image_resized[6];
+							$image_meta['height'] = $image_resized[7];
+						}
 					}
+				}
+
+				if ( isset( $image_meta['width'], $image_meta['height'] ) ) {
+					$image_args['width']  = $image_meta['width'];
+					$image_args['height'] = $image_meta['height'];
+
+					list( $image_args['width'], $image_args['height'] ) = image_constrain_size_for_editor( $image_args['width'], $image_args['height'], $size, 'display' );
+					$has_size_meta = true;
 				}
 
 				// Expose determined arguments to a filter before passing to Photon
@@ -360,19 +406,20 @@ class My_Photon {
 
 				// Check specified image dimensions and account for possible zero values; photon fails to resize if a dimension is zero.
 				if ( 0 == $image_args['width'] || 0 == $image_args['height'] ) {
-					if ( 0 == $image_args['width'] && 0 < $image_args['height'] )
+					if ( 0 == $image_args['width'] && 0 < $image_args['height'] ) {
 						$photon_args['h'] = $image_args['height'];
-					elseif ( 0 == $image_args['height'] && 0 < $image_args['width'] )
+					} elseif ( 0 == $image_args['height'] && 0 < $image_args['width'] ) {
 						$photon_args['w'] = $image_args['width'];
+					}
 				} else {
-					if( 'resize' == $transform ) {
-						// Lets make sure that we don't upscale images since wp never upscales them as well
-						$image_meta = wp_get_attachment_metadata( $attachment_id );
+					if ( 'resize' === $transform && $image_meta = wp_get_attachment_metadata( $attachment_id ) ) {
+						if ( isset( $image_meta['width'], $image_meta['height'] ) ) {
+							// Lets make sure that we don't upscale images since wp never upscales them as well
+							$smaller_width = ( ( $image_meta['width'] < $image_args['width'] ) ? $image_meta['width'] : $image_args['width'] );
+							$smaller_height = ( ( $image_meta['height'] < $image_args['height'] ) ? $image_meta['height'] : $image_args['height'] );
 
-						$smaller_width  = ( ( $image_meta['width']  < $image_args['width']  ) ? $image_meta['width']  : $image_args['width']  );
-						$smaller_height = ( ( $image_meta['height'] < $image_args['height'] ) ? $image_meta['height'] : $image_args['height'] );
-
-						$photon_args[ $transform ] = $smaller_width . ',' . $smaller_height;
+							$photon_args[ $transform ] = $smaller_width . ',' . $smaller_height;
+						}
 					} else {
 						$photon_args[ $transform ] = $image_args['width'] . ',' . $image_args['height'];
 					}
@@ -381,11 +428,12 @@ class My_Photon {
 
 				$photon_args = apply_filters( 'my_photon_image_downsize_string', $photon_args, compact( 'image_args', 'image_url', 'attachment_id', 'size', 'transform' ) );
 
-				// Generate Photon URL
+				/// Generate Photon URL
 				$image = array(
 					my_photon_url( $image_url, $photon_args ),
-					false,
-					false
+					$has_size_meta ? $image_args['width'] : false,
+					$has_size_meta ? $image_args['height'] : false,
+					$intermediate,
 				);
 			} elseif ( is_array( $size ) ) {
 				// Pull width and height values from the provided array, if possible
@@ -393,8 +441,26 @@ class My_Photon {
 				$height = isset( $size[1] ) ? (int) $size[1] : false;
 
 				// Don't bother if necessary parameters aren't passed.
-				if ( ! $width || ! $height )
+				if ( ! $width || ! $height ) {
 					return $image;
+				}
+
+				$image_meta = wp_get_attachment_metadata( $attachment_id );
+				if ( isset( $image_meta['width'], $image_meta['height'] ) ) {
+					$image_resized = image_resize_dimensions( $image_meta['width'], $image_meta['height'], $width, $height );
+
+					if ( $image_resized ) { // This could be false when the requested image size is larger than the full-size image.
+						$width = $image_resized[6];
+						$height = $image_resized[7];
+					} else {
+						$width = $image_meta['width'];
+						$height = $image_meta['height'];
+					}
+
+					$has_size_meta = true;
+				}
+
+				list( $width, $height ) = image_constrain_size_for_editor( $width, $height, $size );
 
 				// Expose arguments to a filter before passing to Photon
 				$photon_args = array(
@@ -406,13 +472,56 @@ class My_Photon {
 				// Generate Photon URL
 				$image = array(
 					my_photon_url( $image_url, $photon_args ),
-					false,
-					false
+					$has_size_meta ? $width : false,
+					$has_size_meta ? $height : false,
+					$intermediate,
 				);
 			}
 		}
 
 		return $image;
+	}
+
+	/**
+	 * Filters an array of image `srcset` values, replacing each URL with its Photon equivalent.
+	 *
+	 * @since 3.8.0
+	 * @param array $sources An array of image urls and widths.
+	 * @uses self::validate_image_url, my_photon_url
+	 * @return array An array of Photon image urls and widths.
+	 */
+	public function filter_srcset_array( $sources, $size_array, $image_src, $image_meta ) {
+		$upload_dir = wp_upload_dir();
+
+		foreach ( $sources as $i => $source ) {
+			if ( ! self::validate_image_url( $source['url'] ) ) {
+				continue;
+			}
+
+			$url = $source['url'];
+			list( $width, $height ) = My_Photon::parse_dimensions_from_filename( $url );
+
+			// It's quicker to get the full size with the data we have already, if available
+			if ( isset( $image_meta['file'] ) ) {
+				$url = trailingslashit( $upload_dir['baseurl'] ) . $image_meta['file'];
+			} else {
+				$url = my_Photon::strip_image_dimensions_maybe( $url );
+			}
+
+			$args = array();
+			if ( 'w' === $source['descriptor'] ) {
+				if ( $height && ( $source['value'] == $width ) ) {
+					$args['resize'] = $width . ',' . $height;
+				} else {
+					$args['w'] = $source['value'];
+				}
+
+			}
+
+			$sources[ $i ]['url'] = my_photon_url( $url, $args );
+		}
+
+		return $sources;
 	}
 
 	/**
@@ -442,8 +551,9 @@ class My_Photon {
 		) );
 
 		// Bail if scheme isn't http or port is set that isn't port 80
-		if ( ( 'http' != $url_info['scheme'] || ! in_array( $url_info['port'], array( 80, null ) ) ) && apply_filters( 'my_photon_reject_https', true ) )
+		if ( ( 'http' != $url_info['scheme'] || ! in_array( $url_info['port'], array( 80, null ) ) ) && apply_filters( 'my_photon_reject_https', false ) ) {
 			return false;
+		}
 
 		// Bail if no host is found
 		if ( is_null( $url_info['host'] ) )
