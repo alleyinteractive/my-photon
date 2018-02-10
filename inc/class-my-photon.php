@@ -428,10 +428,13 @@ class My_Photon {
 	 * @return bool
 	 */
 	protected static function validate_image_url( $url ) {
+		$base_url = My_Photon_Settings::get( 'base-url' );
+		$base_url_parsed = @parse_url( $base_url );
 		$parsed_url = @parse_url( $url );
 
-		if ( ! $parsed_url )
+		if ( ! $parsed_url ) {
 			return false;
+		}
 
 		// Parse URL and ensure needed keys exist, since the array returned by `parse_url` only includes the URL components it finds.
 		$url_info = wp_parse_args( $parsed_url, array(
@@ -441,29 +444,52 @@ class My_Photon {
 			'path'   => null
 		) );
 
-		// Bail if scheme isn't http or port is set that isn't port 80
-		if ( ( 'http' != $url_info['scheme'] || ! in_array( $url_info['port'], array( 80, null ) ) ) && apply_filters( 'my_photon_reject_https', true ) )
+		// Ensure port/protocol matches that of the image server.
+		if ( $url_info['scheme'] !== $base_url_parsed['scheme']
+			|| ( 'https' === $url_info['scheme']
+			     && apply_filters( 'my_photon_reject_https', false )
+			)
+		) {
 			return false;
+		}
 
 		// Bail if no host is found
-		if ( is_null( $url_info['host'] ) )
+		if ( is_null( $url_info['host'] ) ) {
 			return false;
+		}
 
 		// Bail if the image alredy went through Photon
-		if ( false !== strpos( My_Photon_Settings::get( 'base-url' ), $url_info['host'] ) )
+		if ( false !== strpos( $base_url, $url_info['host'] ) ) {
 			return false;
+		}
 
 		// Bail if no path is found
-		if ( is_null( $url_info['path'] ) )
+		if ( is_null( $url_info['path'] ) ) {
 			return false;
+		}
 
 		// Ensure image extension is acceptable
-		if ( ! in_array( strtolower( pathinfo( $url_info['path'], PATHINFO_EXTENSION ) ), self::$extensions ) )
+		if ( ! in_array(
+			strtolower( pathinfo( $url_info['path'], PATHINFO_EXTENSION ) ),
+			self::$extensions
+		) ) {
 			return false;
+		}
 
-		// If we got this far, we should have an acceptable image URL
-		// But let folks filter to decline if they prefer.
-		return apply_filters( 'photon_validate_image_url', true, $url, $parsed_url );
+		/**
+		 * Allow themes and plugins to add additional logic to determine
+		 * whether the URL should be Photonized.
+		 *
+		 * @param bool $is_valid Whether the image URL should be Photonized.
+		 * @param string $url The URL that is being examined.
+		 * @param array $parsed_url The URL as passed through parse_url().
+		 */
+		return apply_filters(
+			'photon_validate_image_url',
+			true,
+			$url,
+			$parsed_url
+		);
 	}
 
 	/**
