@@ -370,15 +370,16 @@ class My_Photon {
 						$image_meta = wp_get_attachment_metadata( $attachment_id );
 
 						if ( is_array( $image_meta ) ) {
-							$smaller_width  = ( ( $image_meta['width']  < $image_args['width']  ) ? $image_meta['width']  : $image_args['width'] );
+							$smaller_width  = ( ( $image_meta['width'] < $image_args['width'] ) ? $image_meta['width'] : $image_args['width'] );
 							$smaller_height = ( ( $image_meta['height'] < $image_args['height'] ) ? $image_meta['height'] : $image_args['height'] );
 
 							$photon_args[ $transform ] = $smaller_width . ',' . $smaller_height;
+						} else {
+							$photon_args[ $transform ] = $image_args['width'] . ',' . $image_args['height'];
 						}
 					} else {
 						$photon_args[ $transform ] = $image_args['width'] . ',' . $image_args['height'];
 					}
-
 				}
 
 				$photon_args = apply_filters( 'my_photon_image_downsize_string', $photon_args, compact( 'image_args', 'image_url', 'attachment_id', 'size', 'transform' ) );
