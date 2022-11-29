@@ -366,13 +366,15 @@ class My_Photon {
 						$photon_args['w'] = $image_args['width'];
 				} else {
 					if( 'resize' == $transform ) {
-						// Lets make sure that we don't upscale images since wp never upscales them as well
+						// Lets make sure that we don't upscale images since wp never upscales them as well.
 						$image_meta = wp_get_attachment_metadata( $attachment_id );
 
-						$smaller_width  = ( ( $image_meta['width']  < $image_args['width']  ) ? $image_meta['width']  : $image_args['width']  );
-						$smaller_height = ( ( $image_meta['height'] < $image_args['height'] ) ? $image_meta['height'] : $image_args['height'] );
+						if ( is_array( $image_meta ) ) {
+							$smaller_width  = ( ( $image_meta['width']  < $image_args['width']  ) ? $image_meta['width']  : $image_args['width'] );
+							$smaller_height = ( ( $image_meta['height'] < $image_args['height'] ) ? $image_meta['height'] : $image_args['height'] );
 
-						$photon_args[ $transform ] = $smaller_width . ',' . $smaller_height;
+							$photon_args[ $transform ] = $smaller_width . ',' . $smaller_height;
+						}
 					} else {
 						$photon_args[ $transform ] = $image_args['width'] . ',' . $image_args['height'];
 					}
