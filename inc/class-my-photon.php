@@ -53,7 +53,7 @@ class My_Photon {
 
 		// Images in post content and galleries
 		add_filter( 'the_content', array( __CLASS__, 'filter_the_content' ), 999999 );
-		add_filter( 'get_post_gallery', array( __CLASS__, 'filter_the_content' ), 999999 );
+		add_filter( 'get_post_galleries', array( __CLASS__, 'filter_the_galleries' ), 999999 );
 
 		// Core image retrieval
 		add_filter( 'image_downsize', array( $this, 'filter_image_downsize' ), 10, 3 );
@@ -305,6 +305,28 @@ class My_Photon {
 		}
 
 		return $content;
+	}
+
+	/**
+	 * Filter Core galleries
+	 *
+	 * @param array $galleries Gallery array.
+	 * @return array
+	 */
+	public static function filter_the_galleries( $galleries ) {
+		if ( empty( $galleries ) || ! is_array( $galleries ) ) {
+			return $galleries;
+		}
+
+		// Pass by reference, so we can modify them in place.
+		foreach ( $galleries as &$this_gallery ) {
+			if ( is_string( $this_gallery ) ) {
+				$this_gallery = self::filter_the_content( $this_gallery );
+			}
+		}
+		unset( $this_gallery ); // break the reference.
+
+		return $galleries;
 	}
 
 	/**
